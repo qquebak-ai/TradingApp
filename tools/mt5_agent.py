@@ -14,18 +14,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.app.config import load_dotenv  # noqa: E402
 from backend.app.ingest.mt5_live import MT5Settings, MT5Unavailable, sync  # noqa: E402
 
+# Re-send a few days of already-known trades on every pass: swap accrues and
+# a broker can correct a close after the fact, and the server updates in place.
+OVERLAP_DAYS = 3
 
-def push(url: str, token: str | None, result) -> dict:
+
+def push(url: str, token: str | None, result, trades) -> dict:
     payload = {
         "account": {
             "login": result.account.login,
@@ -47,7 +54,7 @@ def push(url: str, token: str | None, result) -> dict:
                 "fee": t.fee, "sl": t.sl, "tp": t.tp, "magic": t.magic,
                 "comment": t.comment,
             }
-            for t in result.trades
+            for t in trades
         ],
         "open_positions": [p.to_dict() for p in result.open_positions],
     }
@@ -63,7 +70,7 @@ def push(url: str, token: str | None, result) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def run_once(args) -> int:
+def run_once(args, high_water: dict) -> int:
     settings = MT5Settings(
         login=int(args.login) if args.login else None,
         password=args.password,
@@ -80,8 +87,15 @@ def run_once(args) -> int:
     for warning in result.warnings:
         print(f"[!] {warning}", file=sys.stderr)
 
+    # After the first full upload, only the recent tail needs re-sending.
+    trades = result.trades
+    seen = high_water.get("close_time")
+    if seen is not None:
+        cutoff = seen - timedelta(days=OVERLAP_DAYS)
+        trades = [t for t in result.trades if t.close_time >= cutoff]
+
     try:
-        response = push(args.url, args.token, result)
+        response = push(args.url, args.token, result, trades)
     except urllib.error.HTTPError as exc:
         print(f"[HTTP {exc.code}] {exc.read().decode('utf-8', 'replace')}", file=sys.stderr)
         return 3
@@ -89,18 +103,29 @@ def run_once(args) -> int:
         print(f"[сеть] Дашборд недоступен по адресу {args.url}: {exc}", file=sys.stderr)
         return 4
 
+    if result.trades:
+        high_water["close_time"] = max(t.close_time for t in result.trades)
+
+    stamp = datetime.now().strftime("%H:%M:%S")
     print(
-        f"Счёт {result.account.login}: сделок {result.trades_seen}, "
-        f"добавлено {response.get('trades_added')}, обновлено {response.get('trades_updated')}, "
-        f"открыто сейчас {len(result.open_positions)}"
+        f"[{stamp}] Счёт {result.account.login}: в терминале {result.trades_seen} сделок, "
+        f"отправлено {len(trades)}, добавлено {response.get('trades_added')}, "
+        f"обновлено {response.get('trades_updated')}, "
+        f"открыто сейчас {len(result.open_positions)}",
+        flush=True,
     )
     return 0
 
 
 def main() -> int:
+    # Настройки читаются из .env, как и у самого дашборда; флаги их перебивают.
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Отправляет историю MT5 в TradingApp")
-    parser.add_argument("--url", default="http://127.0.0.1:8420", help="адрес дашборда")
-    parser.add_argument("--token", default=None, help="TRADINGAPP_TOKEN, если он задан")
+    parser.add_argument("--url", default=os.environ.get("TRADINGAPP_URL", "http://127.0.0.1:8420"),
+                        help="адрес дашборда (или TRADINGAPP_URL в .env)")
+    parser.add_argument("--token", default=os.environ.get("TRADINGAPP_TOKEN") or None,
+                        help="токен доступа (или TRADINGAPP_TOKEN в .env)")
     parser.add_argument("--login", default=None, help="номер счёта (иначе берётся активный)")
     parser.add_argument("--password", default=None)
     parser.add_argument("--server", default=None, help="сервер брокера")
@@ -110,12 +135,17 @@ def main() -> int:
                         help="повторять каждые N секунд (0 — один раз и выйти)")
     args = parser.parse_args()
 
-    if not args.interval:
-        return run_once(args)
+    high_water: dict = {}
 
-    print(f"Синхронизация каждые {args.interval} с. Ctrl+C — остановить.")
+    if not args.interval:
+        return run_once(args, high_water)
+
+    print(f"Отправляю историю на {args.url} каждые {args.interval} с. Ctrl+C — остановить.")
     while True:
-        run_once(args)
+        try:
+            run_once(args, high_water)
+        except Exception as exc:  # никакая разовая ошибка не должна ронять агента
+            print(f"[!] Сбой цикла: {exc}", file=sys.stderr)
         try:
             time.sleep(args.interval)
         except KeyboardInterrupt:
