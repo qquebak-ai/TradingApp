@@ -1,0 +1,12 @@
+# Ядро приложения
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9   # загрузка файла отчёта через форму
+
+# Опционально
+openpyxl>=3.1             # импорт отчётов MT5 в формате XLSX
+# MetaTrader5>=5.0.45     # живой коннектор к терминалу; ставится ТОЛЬКО на Windows
+
+# Разработка
+pytest>=8.0
+httpx>=0.27               # нужен TestClient из FastAPI
