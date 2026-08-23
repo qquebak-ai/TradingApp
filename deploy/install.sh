@@ -13,27 +13,71 @@ APP_USER=tradingapp
 REPO=https://github.com/qquebak-ai/TradingApp.git
 BRANCH=claude/trading-app-statistics-5r7nsg
 
+# `set -e` aborts on the first failure, and the reason scrolls away in a long
+# install. The trap names the step that died so it is the last thing on screen.
+STEP="запуск"
+step() { STEP="$1"; echo "==> $1"; }
+on_error() {
+  local code=$?
+  echo >&2
+  echo "======================================================" >&2
+  echo " [!] Установка прервалась на шаге: $STEP" >&2
+  echo "     Строка $1, код выхода $code." >&2
+  echo "     Текст ошибки — чуть выше этого блока." >&2
+  echo "     Скрипт можно запускать повторно: он продолжит с места обрыва." >&2
+  echo "======================================================" >&2
+  exit "$code"
+}
+trap 'on_error $LINENO' ERR
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "Запусти от root: sudo bash deploy/install.sh" >&2
   exit 1
 fi
 
-echo "==> Проверяю зависимости системы"
-if ! command -v python3 >/dev/null; then
-  echo "Нет python3. Установи: apt install -y python3 python3-venv git" >&2
-  exit 1
-fi
-if ! python3 -c "import venv" >/dev/null 2>&1; then
-  echo "Нет модуля venv. Установи: apt install -y python3-venv" >&2
-  exit 1
-fi
-command -v git >/dev/null || { echo "Нет git. Установи: apt install -y git" >&2; exit 1; }
+step "Проверяю зависимости системы"
+missing=""
+command -v python3 >/dev/null || missing="$missing python3"
+command -v git     >/dev/null || missing="$missing git"
 
-echo "==> Пользователь $APP_USER"
+# `import venv` succeeds on Debian/Ubuntu even when python3-venv is absent —
+# the module is there, but `python3 -m venv` then dies on ensurepip. Checking
+# ensurepip is what actually tells the two apart.
+python3 -c "import ensurepip" >/dev/null 2>&1 || missing="$missing python3-venv"
+
+if [ -n "$missing" ]; then
+  echo "    Не хватает пакетов:$missing"
+  if command -v apt-get >/dev/null; then
+    echo "    Ставлю их..."
+    apt-get update -qq
+    # shellcheck disable=SC2086
+    apt-get install -y -qq $missing
+  else
+    echo "[!] Установи их вручную и запусти скрипт заново:$missing" >&2
+    exit 1
+  fi
+fi
+
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+  echo "[!] python3-venv так и не поставился. Установи вручную:" >&2
+  echo "    sudo apt install -y python3-venv" >&2
+  exit 1
+fi
+
+# systemd is what runs the service; without it the last step cannot work.
+if ! command -v systemctl >/dev/null || [ ! -d /run/systemd/system ]; then
+  echo "[!] systemd не обнаружен. Это контейнер (LXC/Docker) без systemd?" >&2
+  echo "    Приложение можно запустить вручную:" >&2
+  echo "    cd $APP_DIR && sudo -u $APP_USER .venv/bin/python -m uvicorn \\" >&2
+  echo "      backend.app.main:app --host 127.0.0.1 --port 8420" >&2
+  exit 1
+fi
+
+step "Пользователь $APP_USER"
 id -u "$APP_USER" >/dev/null 2>&1 || \
   useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
 
-echo "==> Код в $APP_DIR"
+step "Код в $APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
   sudo -u "$APP_USER" git -C "$APP_DIR" fetch origin "$BRANCH"
   sudo -u "$APP_USER" git -C "$APP_DIR" checkout "$BRANCH"
@@ -45,7 +89,7 @@ else
 fi
 sudo -u "$APP_USER" mkdir -p "$APP_DIR/data"
 
-echo "==> Зависимости Python"
+step "Зависимости Python"
 [ -d "$APP_DIR/.venv" ] || sudo -u "$APP_USER" python3 -m venv "$APP_DIR/.venv"
 
 # sudo сбрасывает окружение, поэтому настройки прокси и сертификатов, если они
@@ -69,10 +113,10 @@ pip_as_app install --quiet -r "$APP_DIR/requirements.txt"
 # Токен генерируется один раз и при повторном запуске не перезаписывается,
 # иначе телефон разлогинится на каждом обновлении.
 if [ -f "$APP_DIR/.env" ]; then
-  echo "==> .env уже есть, не трогаю"
+  step ".env уже есть, не трогаю"
   TOKEN="$(grep -E '^TRADINGAPP_TOKEN=' "$APP_DIR/.env" | cut -d= -f2- || true)"
 else
-  echo "==> Создаю .env со случайным токеном"
+  step "Создаю .env со случайным токеном"
   TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
   cat > "$APP_DIR/.env" <<ENV
 TRADINGAPP_DB=$APP_DIR/data/trading.db
@@ -85,7 +129,7 @@ ENV
 fi
 chmod 600 "$APP_DIR/.env"
 
-echo "==> Автозапуск через systemd"
+step "Автозапуск через systemd"
 cp "$APP_DIR/deploy/tradingapp.service" /etc/systemd/system/tradingapp.service
 systemctl daemon-reload
 systemctl enable --now tradingapp
