@@ -101,6 +101,8 @@ body {
 .brand .sub { color: var(--muted); font-size: 12px; }
 
 .acct { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.lbl-short { display: none; }
+#btn-filters { display: none; }
 .acct .item { display: flex; flex-direction: column; line-height: 1.25; }
 .acct .item span:first-child { font-size: 11px; color: var(--muted); }
 .acct .item span:last-child { font-size: 14px; font-weight: 600; }
@@ -142,10 +144,18 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .chip[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
 
 /* ---------- tabs ---------- */
-.tabs { display: flex; gap: 2px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.tabs {
+  display: flex; gap: 2px; padding: 0 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  /* Five tabs do not fit a phone: scroll them instead of wrapping, which
+     would push the row under the header and make the last tab untappable. */
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   background: none; border: none; border-bottom: 2px solid transparent;
   border-radius: 0; padding: 11px 14px; color: var(--ink-2); font-weight: 550;
+  white-space: nowrap; flex: none;
 }
 .tab:hover { background: var(--surface-2); }
 .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: none; }
@@ -267,13 +277,46 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .status[data-kind="info"] { display: block; background: var(--surface-2); border-left: 3px solid var(--accent); }
 
 .empty { text-align: center; padding: 56px 20px; color: var(--ink-2); }
+.login-form { display: flex; gap: 8px; justify-content: center; margin: 18px auto 0; max-width: 340px; }
+.login-form input { flex: 1; min-width: 0; }
+#login .status { max-width: 340px; margin: 12px auto 0; text-align: left; }
 .empty h2 { margin: 0 0 6px; font-size: 17px; color: var(--ink); }
 .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 720px) {
-  .topbar { gap: 10px; }
-  .acct { gap: 12px; }
+  /* A sticky header that wraps to four lines eats half a phone screen and
+     covers the tab row underneath it. */
+  .topbar { position: static; gap: 8px; padding: 10px 14px; }
+  .brand h1 { font-size: 15px; }
+  .brand .sub { display: none; }
+
+  .acct {
+    order: 3; width: 100%; gap: 14px;
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+  }
+  .acct::-webkit-scrollbar { display: none; }
+  .acct .item { flex: none; }
+  .acct .item span:last-child { font-size: 13px; }
+
+  .lbl-full { display: none; }
+  .lbl-short { display: inline; }
+  #btn-filters { display: inline-block; }
+  .topbar button { padding: 7px 9px; font-size: 13px; }
+  /* Measured: the full-width labels overflow 390px by ~20px, so the
+     filter button drops to an icon and the whole row fits one line. */
+  #btn-filters .lbl-short { font-size: 15px; line-height: 1; }
+
+  /* Filters stay one tap away rather than occupying the top of every screen. */
+  .filters { padding: 12px 14px; }
+  .filters.collapsed { display: none !important; }
+  .field { flex: 1 1 140px; }
+  input, select { min-width: 0; width: 100%; }
+  .chips { flex-wrap: wrap; }
+
+  .tabs { padding: 0 14px; }
   main { padding: 14px; }
+  .card { padding: 14px; }
+  .grid-2 { grid-template-columns: 1fr; }
 }

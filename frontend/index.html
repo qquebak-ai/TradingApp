@@ -22,8 +22,9 @@
     <div class="item"><span>Открытых позиций</span><span id="acct-open" class="num">0</span></div>
   </div>
 
-  <button id="btn-sync" title="Прочитать историю напрямую из терминала MT5 (только Windows)">Синхронизировать MT5</button>
-  <button id="btn-import" class="primary">Импорт отчёта</button>
+  <button id="btn-filters" title="Показать фильтры" aria-label="Показать фильтры" aria-expanded="false"><span class="lbl-full">Фильтры</span><span class="lbl-short" aria-hidden="true">☰</span></button>
+  <button id="btn-sync" title="Прочитать историю напрямую из терминала MT5 (только Windows)"><span class="lbl-full">Синхронизировать MT5</span><span class="lbl-short">MT5</span></button>
+  <button id="btn-import" class="primary"><span class="lbl-full">Импорт отчёта</span><span class="lbl-short">Импорт</span></button>
   <button id="btn-theme" title="Светлая / тёмная тема" aria-label="Переключить тему">◐</button>
 </header>
 
@@ -65,6 +66,18 @@
 </nav>
 
 <main>
+  <div id="login" class="empty" hidden>
+    <h2>Нужен токен доступа</h2>
+    <p>Дашборд закрыт паролем, потому что показывает историю твоего счёта.<br>
+       Введи токен из переменной <code>TRADINGAPP_TOKEN</code> — браузер запомнит его.</p>
+    <form id="login-form" class="login-form" autocomplete="on">
+      <input type="password" id="login-token" name="password" placeholder="Токен доступа"
+             autocomplete="current-password" required>
+      <button type="submit" class="primary">Войти</button>
+    </form>
+    <p class="status" id="login-status"></p>
+  </div>
+
   <div id="empty" class="empty">
     <h2>Данных пока нет</h2>
     <p>Загрузи отчёт из терминала MetaTrader — и увидишь всю статистику по счёту.<br>

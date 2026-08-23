@@ -65,6 +65,70 @@ git checkout claude/trading-app-statistics-5r7nsg
 
 Открой `http://127.0.0.1:8420`.
 
+### На своём сервере (доступ с телефона)
+
+Дашборд можно поставить на VPS и открывать с телефона из любой точки. Учти три вещи.
+
+**Живая синхронизация с MT5 на Linux-сервере не работает** — пакет `MetaTrader5`
+существует только под Windows. На сервере остаётся импорт отчёта, а лучший вариант —
+держать MT5 у себя на Windows и запускать агента, который сам шлёт историю на сервер:
+
+```sh
+python tools/mt5_agent.py --url https://trading.example.com --token ТОКЕН --interval 300
+```
+
+**Обязательны HTTPS и токен.** Без них история счёта и сам токен идут по сети
+открытым текстом, а страницу находят сканеры портов за пару дней.
+
+**Нужен отдельный поддомен**, например `trading.example.com`, а не подпапка вида
+`example.com/trading`: фронтенд запрашивает `/static` и `/api` от корня сайта.
+
+Установка:
+
+```sh
+# 1. Отдельный пользователь и папка
+sudo useradd --system --home /opt/tradingapp --shell /usr/sbin/nologin tradingapp
+sudo mkdir -p /opt/tradingapp && sudo chown tradingapp:tradingapp /opt/tradingapp
+
+# 2. Код и зависимости
+sudo -u tradingapp git clone https://github.com/qquebak-ai/TradingApp.git /opt/tradingapp
+cd /opt/tradingapp
+sudo -u tradingapp git checkout claude/trading-app-statistics-5r7nsg
+sudo -u tradingapp python3 -m venv .venv
+sudo -u tradingapp .venv/bin/pip install -r requirements.txt
+sudo -u tradingapp mkdir -p data
+
+# 3. Настройки. Токен генерируем случайный, а не придумываем.
+python3 -c "import secrets; print('TRADINGAPP_TOKEN=' + secrets.token_urlsafe(32))"
+sudo -u tradingapp cp .env.example .env
+sudo -u tradingapp nano .env          # вставь токен, host оставь 127.0.0.1
+sudo chmod 600 /opt/tradingapp/.env
+
+# 4. Автозапуск
+sudo cp deploy/tradingapp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tradingapp
+systemctl status tradingapp
+```
+
+Дальше — reverse proxy с сертификатом. Готовые примеры лежат в `deploy/`:
+`Caddyfile.example` (Caddy сам выпустит сертификат) или `nginx.conf.example`
+(плюс `certbot --nginx`). Оба уже содержат увеличенный лимит на размер загружаемого
+файла — отчёты MT4/MT5 не помещаются в лимит по умолчанию.
+
+`TRADINGAPP_HOST` в `.env` оставь равным `127.0.0.1`: наружу приложение смотрит
+только через proxy, порт 8420 в интернет открывать не нужно.
+
+Открой `https://trading.example.com` с телефона — появится экран входа, введи токен,
+браузер его запомнит. Интерфейс адаптирован под телефон: фильтры прячутся за кнопкой
+☰, вкладки прокручиваются, таблицы скроллятся по горизонтали.
+
+Обновление до новой версии:
+
+```sh
+cd /opt/tradingapp && sudo -u tradingapp git pull && sudo systemctl restart tradingapp
+```
+
 ### Что дальше
 
 Нажми **«Импорт отчёта»** и загрузи выгрузку из терминала. Чтобы сначала просто

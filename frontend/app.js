@@ -9,9 +9,15 @@
     tradesSort: { key: 'close_time', desc: true },
   };
 
-  const token = new URLSearchParams(location.search).get('token')
-    || localStorage.getItem('tradingapp_token') || '';
-  if (token) localStorage.setItem('tradingapp_token', token);
+  // A token may arrive in the URL (convenient once) or from a previous login.
+  // It is stripped from the address bar straight away so it does not sit in
+  // browser history or in a screenshot of the page.
+  const fromUrl = new URLSearchParams(location.search).get('token');
+  let token = fromUrl || localStorage.getItem('tradingapp_token') || '';
+  if (fromUrl) {
+    localStorage.setItem('tradingapp_token', fromUrl);
+    history.replaceState(null, '', location.pathname);
+  }
 
   async function api(path, options = {}) {
     const headers = { ...(options.headers || {}) };
@@ -321,8 +327,30 @@
     return out;
   }
 
+  function showLogin(message) {
+    $('login').hidden = false;
+    $('empty').hidden = true;
+    $('filters').hidden = true;
+    $('tabs').hidden = true;
+    $('acct-strip').hidden = true;
+    document.querySelectorAll('.panel').forEach(p => (p.hidden = true));
+    const status = $('login-status');
+    if (message) {
+      status.dataset.kind = 'err';
+      status.textContent = message;
+    } else {
+      status.removeAttribute('data-kind');
+      status.textContent = '';
+    }
+  }
+
   async function refresh() {
     const health = await api('/api/health');
+    if (health.authenticated === false) {
+      showLogin(token ? 'Токен не подошёл. Проверь значение TRADINGAPP_TOKEN.' : '');
+      return;
+    }
+    $('login').hidden = true;
     const hasData = health.trades > 0;
     $('empty').hidden = hasData;
     $('filters').hidden = !hasData;
@@ -413,6 +441,22 @@
     });
   }
 
+  /** On a phone the filter row starts folded away; the button reveals it. */
+  function bindFilterToggle() {
+    const filters = $('filters');
+    const button = $('btn-filters');
+    const narrow = () => window.matchMedia('(max-width: 720px)').matches;
+
+    const sync = () => filters.classList.toggle('collapsed', narrow());
+    sync();
+    window.addEventListener('resize', sync);
+
+    button.addEventListener('click', () => {
+      const open = filters.classList.toggle('collapsed');
+      button.setAttribute('aria-expanded', String(!open));
+    });
+  }
+
   function bindTabs() {
     $('tabs').addEventListener('click', event => {
       const tab = event.target.closest('.tab');
@@ -462,7 +506,7 @@
     $('btn-sync').addEventListener('click', async () => {
       const button = $('btn-sync');
       button.disabled = true;
-      const label = button.textContent;
+      const label = button.innerHTML;
       button.innerHTML = '<span class="spinner"></span> Синхронизация…';
       try {
         const result = await api('/api/sync/mt5', { method: 'POST' });
@@ -473,7 +517,7 @@
         showError(error);
       } finally {
         button.disabled = false;
-        button.textContent = label;
+        button.innerHTML = label;
       }
     });
   }
@@ -512,7 +556,22 @@
     });
   }
 
+  $('login-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const entered = $('login-token').value.trim();
+    if (!entered) return;
+    token = entered;
+    localStorage.setItem('tradingapp_token', token);
+    $('login-token').value = '';
+    try {
+      await refresh();
+    } catch (error) {
+      showLogin(error.message);
+    }
+  });
+
   bindFilters();
+  bindFilterToggle();
   bindTabs();
   bindImport();
   bindTheme();

@@ -1,0 +1,18 @@
+# Вариант с Caddy — самый короткий: сертификат Let's Encrypt он получит сам.
+# Добавь этот блок в свой /etc/caddy/Caddyfile рядом с существующим сайтом
+# и выполни: sudo systemctl reload caddy
+#
+# ВАЖНО: нужен отдельный поддомен (trading.твойдомен.ru), а не подпапка
+# (твойдомен.ru/trading). Фронтенд запрашивает /static и /api от корня,
+# на подпапке он не заработает.
+
+trading.example.com {
+    reverse_proxy 127.0.0.1:8420
+
+    # Отчёты MT4/MT5 бывают в несколько мегабайт.
+    request_body {
+        max_size 32MB
+    }
+
+    encode gzip
+}

@@ -99,11 +99,21 @@ def _store(result, source: str) -> dict:
     return result.to_dict()
 
 
+def _authenticated(authorization: Optional[str]) -> bool:
+    return not settings.api_token or authorization == f"Bearer {settings.api_token}"
+
+
 @app.get("/api/health")
-def health() -> dict:
+def health(authorization: Optional[str] = Header(default=None)) -> dict:
+    """Open endpoint, so uptime checks work — but it tells an anonymous caller
+    nothing beyond "this is a TradingApp and it wants a token"."""
+    if not _authenticated(authorization):
+        return {"status": "ok", "auth_required": True, "authenticated": False}
     trades = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
     return {
         "status": "ok",
+        "auth_required": bool(settings.api_token),
+        "authenticated": True,
         "trades": trades,
         "db": str(settings.db_path),
         "mt5_configured": settings.mt5_login is not None or settings.mt5_path is not None,

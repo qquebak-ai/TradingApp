@@ -45,6 +45,7 @@ def upload(client, payload=STATEMENT, name="statement.html"):
 def test_health_starts_empty(client):
     body = client.get("/api/health").json()
     assert body["status"] == "ok" and body["trades"] == 0
+    assert body["auth_required"] is False and body["authenticated"] is True
 
 
 def test_import_then_dashboard(client):
@@ -133,8 +134,18 @@ def test_token_protects_the_api_when_configured(tmp_path, monkeypatch):
         assert client.get("/api/summary").status_code == 401
         ok = client.get("/api/summary", headers={"Authorization": "Bearer s3cret"})
         assert ok.status_code == 200
-        # /api/health stays open so a browser can tell "no data" from "wrong token".
-        assert client.get("/api/health").status_code == 200
+
+        # /api/health answers anonymously so uptime checks keep working, but it
+        # must not hand a stranger the trade count or the path to the database.
+        anonymous = client.get("/api/health").json()
+        assert anonymous == {"status": "ok", "auth_required": True, "authenticated": False}
+
+        authorised = client.get("/api/health", headers={"Authorization": "Bearer s3cret"}).json()
+        assert authorised["authenticated"] is True and "trades" in authorised
+
+        # A wrong token must look exactly like no token at all.
+        wrong = client.get("/api/health", headers={"Authorization": "Bearer nope"}).json()
+        assert wrong == anonymous
 
 
 def test_agent_push_ingests_the_same_way_a_statement_does(client):

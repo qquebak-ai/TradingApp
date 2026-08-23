@@ -302,7 +302,9 @@ const Charts = (() => {
       }
       el('line', { class: 'axis-line', x1: padL, x2: width - padR, y1: Y(0), y2: Y(0) }, svg);
 
-      const every = Math.ceil(rows.length / Math.max(4, Math.floor(plotW / 56)));
+      // Show every Nth label, where N is whatever keeps them from touching.
+      const labelPx = Math.max(...rows.map(r => String(labelOf(r)).length)) * 6.4 + 10;
+      const every = Math.max(1, Math.ceil(labelPx / slot));
       rows.forEach((row, i) => {
         const value = valueOf(row);
         const x = padL + i * slot + (slot - barW) / 2;
@@ -315,7 +317,7 @@ const Charts = (() => {
         }, svg);
         bindTip(node, row, value, labelOf, currency, opts);
 
-        if (i % every === 0 || rows.length <= 16) {
+        if (i % every === 0) {
           el('text', { x: x + barW / 2, y: height - 8, 'text-anchor': 'middle' }, svg)
             .textContent = labelOf(row);
         }
