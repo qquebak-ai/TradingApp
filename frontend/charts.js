@@ -151,7 +151,7 @@ const Charts = (() => {
       const peakPath = points.map((p, i) => `${i ? 'L' : 'M'}${X(times[i])} ${Y(p.peak)}`).join('');
       const backPath = points.map((p, i) => `L${X(times[points.length - 1 - i])} ${Y(points[points.length - 1 - i].equity)}`).join('');
       el('path', {
-        d: `${peakPath}${backPath}Z`, fill: 'var(--loss)', 'fill-opacity': .14, stroke: 'none',
+        d: `${peakPath}${backPath}Z`, fill: 'var(--loss)', 'fill-opacity': .10, stroke: 'none',
       }, svg);
 
       el('path', {
@@ -293,7 +293,8 @@ const Charts = (() => {
       const yHi = Math.max(0, ...ticks, ...values);
       const Y = v => padT + plotH - ((v - yLo) / (yHi - yLo || 1)) * plotH;
       const slot = plotW / rows.length;
-      const cap = MAX_BAR || Math.min(96, Math.max(26, 340 / rows.length));
+      // Spec cap: a bar never exceeds 24px, and never fills its slot.
+      const cap = MAX_BAR || 24;
       const barW = Math.min(cap, Math.max(3, slot - GAP * 2));
 
       for (const tick of ticks) {
@@ -405,5 +406,249 @@ const Charts = (() => {
       .textContent = 'Нет данных за выбранный период';
   }
 
-  return { equity, bars, calendar, money, compact, hideTip };
+  /* ---------------------------------------------------------------
+   * Small forms: a sparkline, a meter, a run of outcomes, a month grid,
+   * a distribution. Each is a figure, not a chart with axes — they live
+   * inside tiles and cards where chrome would cost more than it explains.
+   * ------------------------------------------------------------- */
+
+  /** 
+   * Trend behind a stat tile. No axes, no labels — the tile's value carries
+   * the number; this only carries the shape.
+   */
+  function sparkline(host, values, opts = {}) {
+    responsive(host, () => {
+      const height = opts.height || 40;
+      const { svg, width } = svgFor(host, height);
+      if (values.length < 2) return;
+
+      const pad = 3;
+      const lo = Math.min(...values);
+      const hi = Math.max(...values);
+      const X = i => pad + (i / (values.length - 1)) * (width - pad * 2);
+      const Y = v => height - pad - ((v - lo) / (hi - lo || 1)) * (height - pad * 2);
+      const stroke = opts.color || 'var(--profit)';
+
+      const line = values.map((v, i) => `${i ? 'L' : 'M'}${X(i)} ${Y(v)}`).join('');
+      if (opts.fill !== false) {
+        el('path', {
+          d: `${line}L${X(values.length - 1)} ${height}L${X(0)} ${height}Z`,
+          fill: stroke, 'fill-opacity': .10, stroke: 'none',
+        }, svg);
+      }
+      el('path', {
+        d: line, fill: 'none', stroke, 'stroke-width': 2,
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+      }, svg);
+      el('circle', {
+        cx: X(values.length - 1), cy: Y(values[values.length - 1]), r: 3.5,
+        fill: stroke, stroke: 'var(--surface)', 'stroke-width': 2,
+      }, svg);
+    });
+  }
+
+  /**
+   * A ratio against its whole. The unfilled track is a lighter step of the
+   * same hue, so the state reads across the entire bar rather than only the
+   * filled part — and it is never a two-slice pie.
+   */
+  function meter(host, fraction, opts = {}) {
+    const pct = Math.max(0, Math.min(1, fraction || 0));
+    const color = opts.color || 'var(--profit)';
+    host.innerHTML = `
+      <div class="meter" role="img" aria-label="${opts.label || ''} ${Math.round(pct * 100)}%">
+        <div class="meter-track" style="--meter-hue:${color}">
+          <div class="meter-fill" style="width:${(pct * 100).toFixed(1)}%;background:${color}"></div>
+        </div>
+      </div>`;
+  }
+
+  /**
+   * The run of recent outcomes, newest last. Each trade is one thin bar off a
+   * centre line — the shape of a streak is the thing being read, so the bars
+   * stay narrow and unlabelled and the tooltip carries the detail.
+   */
+  function formStrip(host, trades, opts = {}) {
+    const currency = opts.currency || '';
+    responsive(host, () => {
+      const height = opts.height || 64;
+      const { svg, width } = svgFor(host, height);
+      if (!trades.length) return emptyNote(svg, width, height);
+
+      const maxAbs = Math.max(1e-9, ...trades.map(t => Math.abs(t.net)));
+      const slot = width / trades.length;
+      const barW = Math.max(2, Math.min(10, slot - GAP));
+      const mid = height / 2;
+      const reach = mid - 6;
+
+      el('line', { class: 'axis-line', x1: 0, x2: width, y1: mid, y2: mid }, svg);
+
+      trades.forEach((trade, i) => {
+        const h = Math.max(2, (Math.abs(trade.net) / maxAbs) * reach);
+        const x = i * slot + (slot - barW) / 2;
+        const up = trade.net >= 0;
+        const node = el('path', {
+          class: 'mark',
+          d: barPath(x, up ? mid - h : mid, barW, h, up ? 'up' : 'down'),
+          fill: up ? 'var(--profit)' : 'var(--loss)',
+        }, svg);
+        node.addEventListener('mousemove', event => showTip(`
+          <div class="t-title">${trade.symbol}</div>
+          <div class="t-row"><span>Результат</span><b>${money(trade.net, currency)}</b></div>
+          <div class="t-row"><span>Закрыта</span><b>${new Date(trade.close_time).toLocaleString('ru-RU')}</b></div>`,
+          event));
+        node.addEventListener('mouseleave', hideTip);
+      });
+    });
+  }
+
+  /**
+   * Year × month grid of results. A grid of magnitudes is a heatmap; the sign
+   * makes it diverging, so it takes the same blue/red pair with a neutral cell
+   * for months that were never traded.
+   */
+  function monthMatrix(host, months, opts = {}) {
+    const currency = opts.currency || '';
+    host.innerHTML = '';
+    if (!months.length) {
+      host.innerHTML = '<p class="hint">Нет данных за период.</p>';
+      return;
+    }
+
+    const NAMES = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
+                   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const byYear = new Map();
+    for (const row of months) {
+      const [year, month] = row.label.split('-').map(Number);
+      if (!byYear.has(year)) byYear.set(year, new Array(12).fill(null));
+      byYear.get(year)[month - 1] = row;
+    }
+    const years = [...byYear.keys()].sort();
+    const maxAbs = Math.max(1e-9, ...months.map(r => Math.abs(r.net)));
+
+    // A CSS grid rather than a table: table cells treat height as a minimum
+    // and the row stretched unpredictably, which a grid track never does.
+    const grid = document.createElement('div');
+    grid.className = 'matrix';
+
+    const head = document.createElement('div');
+    head.className = 'matrix-row matrix-head';
+    head.appendChild(cellDiv('matrix-year', ''));
+    NAMES.forEach(name => head.appendChild(cellDiv('matrix-label', name)));
+    head.appendChild(cellDiv('matrix-total-label', 'год'));
+    grid.appendChild(head);
+
+    for (const year of years) {
+      const cells = byYear.get(year);
+      const total = cells.reduce((sum, c) => sum + (c ? c.net : 0), 0);
+      const row = document.createElement('div');
+      row.className = 'matrix-row';
+      row.appendChild(cellDiv('matrix-year', String(year)));
+
+      cells.forEach((cell, index) => {
+        const box = document.createElement('div');
+        box.className = 'matrix-box';
+        if (!cell) {
+          // Not `empty`: that class belongs to the page-level empty state and
+          // carries 64px of padding, which silently inflated every row.
+          box.classList.add('matrix-none');
+          box.title = `${NAMES[index]} ${year}: сделок не было`;
+        } else {
+          const intensity = 0.22 + 0.78 * Math.sqrt(Math.abs(cell.net) / maxAbs);
+          box.style.background = cell.net >= 0 ? 'var(--profit)' : 'var(--loss)';
+          box.style.opacity = intensity.toFixed(2);
+          box.addEventListener('mousemove', event => showTip(`
+            <div class="t-title">${NAMES[index]} ${year}</div>
+            <div class="t-row"><span>Итог</span><b>${money(cell.net, currency)}</b></div>
+            <div class="t-row"><span>Сделок</span><b>${cell.trades}</b></div>
+            <div class="t-row"><span>Винрейт</span><b>${cell.win_rate}%</b></div>`, event));
+          box.addEventListener('mouseleave', hideTip);
+        }
+        row.appendChild(box);
+      });
+
+      const totalCell = cellDiv(
+        `matrix-total num ${total >= 0 ? 'pos' : 'neg'}`, money(total, ''));
+      row.appendChild(totalCell);
+      grid.appendChild(row);
+    }
+
+    host.appendChild(grid);
+  }
+
+  function cellDiv(className, text) {
+    const node = document.createElement('div');
+    node.className = className;
+    node.textContent = text;
+    return node;
+  }
+
+  /**
+   * How trade results are spread. Bar height is a count, so the sign has to
+   * come from which side of zero the bucket sits on.
+   */
+  function distribution(host, values, opts = {}) {
+    const currency = opts.currency || '';
+    responsive(host, () => {
+      const height = opts.height || 190;
+      const { svg, width } = svgFor(host, height);
+      if (!values.length) return emptyNote(svg, width, height);
+
+      const maxAbs = Math.max(...values.map(Math.abs));
+      const binCount = 13;                       // odd, so zero sits on a boundary
+      const step = (maxAbs * 2) / binCount;
+      const bins = Array.from({ length: binCount }, (_, i) => ({
+        from: -maxAbs + i * step,
+        to: -maxAbs + (i + 1) * step,
+        count: 0,
+      }));
+      for (const value of values) {
+        const index = Math.min(binCount - 1, Math.max(0, Math.floor((value + maxAbs) / step)));
+        bins[index].count += 1;
+      }
+
+      const padL = 34, padR = 8, padT = 8, padB = AXIS_BAND;
+      const plotW = width - padL - padR;
+      const plotH = height - padT - padB;
+      const peak = Math.max(1, ...bins.map(b => b.count));
+      const slot = plotW / binCount;
+      const barW = Math.min(24, Math.max(3, slot - GAP));
+      const Y = c => padT + plotH - (c / peak) * plotH;
+
+      for (const tick of niceTicks(0, peak, 3)) {
+        el('line', { class: 'grid-line', x1: padL, x2: width - padR, y1: Y(tick), y2: Y(tick) }, svg);
+        el('text', { x: padL - 7, y: Y(tick) + 4, 'text-anchor': 'end' }, svg)
+          .textContent = compact(tick);
+      }
+      el('line', { class: 'axis-line', x1: padL, x2: width - padR, y1: Y(0), y2: Y(0) }, svg);
+
+      bins.forEach((bin, i) => {
+        if (!bin.count) return;
+        const x = padL + i * slot + (slot - barW) / 2;
+        const h = Math.max(1, Y(0) - Y(bin.count));
+        const node = el('path', {
+          class: 'mark',
+          d: barPath(x, Y(bin.count), barW, h, 'up'),
+          fill: bin.to <= 0 ? 'var(--loss)' : 'var(--profit)',
+        }, svg);
+        node.addEventListener('mousemove', event => showTip(`
+          <div class="t-title">${money(bin.from, '')} … ${money(bin.to, currency)}</div>
+          <div class="t-row"><span>Сделок</span><b>${bin.count}</b></div>`, event));
+        node.addEventListener('mouseleave', hideTip);
+      });
+
+      // Only the extremes and the centre are labelled — the tooltip has the rest.
+      const zeroX = padL + plotW / 2;
+      el('line', { class: 'axis-line', x1: zeroX, x2: zeroX, y1: padT, y2: padT + plotH }, svg);
+      el('text', { x: padL, y: height - 8 }, svg).textContent = money(-maxAbs, '');
+      el('text', { x: zeroX, y: height - 8, 'text-anchor': 'middle' }, svg).textContent = '0';
+      el('text', { x: width - padR, y: height - 8, 'text-anchor': 'end' }, svg)
+        .textContent = money(maxAbs, '');
+    });
+  }
+
+  return {
+    equity, bars, calendar, sparkline, meter, formStrip, monthMatrix, distribution,
+    money, compact, hideTip,
+  };
 })();

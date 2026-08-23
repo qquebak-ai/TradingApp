@@ -11,6 +11,7 @@
 
 <header class="topbar">
   <div class="brand">
+    <span class="mark" aria-hidden="true">T</span>
     <h1>TradingApp</h1>
     <span class="sub" id="acct-server">статистика счёта MetaTrader</span>
   </div>
@@ -87,132 +88,185 @@
 
   <!-- ОБЗОР -->
   <section class="panel" id="panel-overview" hidden>
-    <div class="card" id="no-window-data" hidden>
-      <h2>За выбранный период сделок нет</h2>
-      <p class="hint">Смени даты или нажми «Всё», чтобы увидеть всю историю.</p>
-    </div>
-    <div class="tiles" id="tiles"></div>
-
-    <div class="card">
-      <h2>Кривая баланса</h2>
-      <p class="hint">Баланс после каждой закрытой сделки. Красная зона — насколько счёт ниже своего пика.</p>
-      <div class="legend">
-        <span class="key"><i class="swatch" style="background:var(--profit)"></i>Баланс</span>
-        <span class="key"><i class="swatch" style="background:var(--loss);opacity:.35"></i>Просадка от пика</span>
-        <span class="key"><i class="swatch" style="background:var(--axis)"></i>Стартовый баланс</span>
+    <div class="stack">
+      <div class="card" id="no-window-data" hidden>
+        <h2>За выбранный период сделок нет</h2>
+        <p class="hint">Смени даты или нажми «Всё», чтобы увидеть всю историю.</p>
       </div>
-      <div id="chart-equity"></div>
-    </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>Что стоит поправить</h2>
-        <p class="hint">Выводы построены по твоей истории сделок, а не по общим правилам.</p>
-        <div class="findings" id="findings-short"></div>
+      <div class="hero" id="hero">
+        <div class="hero-main">
+          <span class="hero-label" id="hero-label">Итог за период</span>
+          <span class="hero-figure num" id="hero-figure">—</span>
+          <div class="hero-meta" id="hero-meta"></div>
+        </div>
+        <div class="hero-side">
+          <div class="hero-spark" id="hero-spark"></div>
+          <div class="hero-facts" id="hero-facts"></div>
+        </div>
       </div>
+
+      <div class="tiles" id="tiles"></div>
+
       <div class="card">
-        <h2>Результат по месяцам</h2>
-        <p class="hint">Сумма закрытых сделок за календарный месяц.</p>
-        <div id="chart-months"></div>
+        <h2>Кривая баланса</h2>
+        <p class="hint">Баланс после каждой закрытой сделки. Красная зона — насколько счёт ниже своего пика.</p>
+        <div class="legend">
+          <span class="key"><i class="swatch" style="background:var(--profit)"></i>Баланс</span>
+          <span class="key"><i class="swatch" style="background:var(--loss);opacity:.35"></i>Просадка от пика</span>
+          <span class="key"><i class="swatch" style="background:var(--axis)"></i>Стартовый баланс</span>
+        </div>
+        <div id="chart-equity"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>Последние 40 сделок</h2>
+          <p class="hint">Каждый столбик — одна сделка, слева старые. Видно серии и то, чем они кончались.</p>
+          <div id="chart-form"></div>
+        </div>
+        <div class="card">
+          <h2>Открытые позиции</h2>
+          <p class="hint" id="positions-hint">Обновляются при синхронизации с терминалом.</p>
+          <div class="positions" id="positions"></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>Что стоит поправить</h2>
+          <p class="hint">Выводы построены по твоей истории сделок, а не по общим правилам.</p>
+          <div class="findings" id="findings-short"></div>
+        </div>
+        <div class="card">
+          <h2>Распределение результатов</h2>
+          <p class="hint">Сколько сделок попало в каждый диапазон. Длинный хвост слева — редкие крупные убытки.</p>
+          <div id="chart-distribution"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Помесячно по годам</h2>
+        <p class="hint">Насыщенность клетки — размер результата месяца; серая клетка — месяц без сделок.</p>
+        <div class="table-wrap"><div id="chart-matrix"></div></div>
       </div>
     </div>
   </section>
 
   <!-- ИНСТРУМЕНТЫ -->
   <section class="panel" id="panel-symbols" hidden>
-    <div class="card">
-      <h2>P&L по инструментам</h2>
-      <p class="hint">Синий — инструмент приносит деньги, красный — забирает. Значение подписано у каждой полосы.</p>
-      <div id="chart-symbols"></div>
-    </div>
-    <div class="grid-2">
+    <div class="stack">
       <div class="card">
-        <h2>Покупки против продаж</h2>
-        <p class="hint">Перекос в одну сторону часто означает, что работает только половина системы.</p>
-        <div id="chart-sides"></div>
+        <h2>P&L по инструментам</h2>
+        <p class="hint">Синий — инструмент приносит деньги, красный — забирает. Значение подписано у каждой полосы.</p>
+        <div id="chart-symbols"></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Покупки против продаж</h2>
+          <p class="hint">Перекос в одну сторону часто означает, что работает только половина системы.</p>
+          <div id="chart-sides"></div>
+        </div>
+        <div class="card">
+          <h2>Рейтинг инструментов</h2>
+          <p class="hint">Места по итоговому результату за период.</p>
+          <div class="table-wrap"><table id="table-extremes"></table></div>
+        </div>
       </div>
       <div class="card">
-        <h2>Рейтинг инструментов</h2>
-        <p class="hint">Места по итоговому результату за период.</p>
-        <div class="table-wrap"><table id="table-extremes"></table></div>
+        <h2>Подробно по инструментам</h2>
+        <div class="table-wrap"><table id="table-symbols"></table></div>
       </div>
-    </div>
-    <div class="card">
-      <h2>Подробно по инструментам</h2>
-      <div class="table-wrap"><table id="table-symbols"></table></div>
-    </div>
+  </div>
   </section>
 
   <!-- ВРЕМЯ -->
   <section class="panel" id="panel-time" hidden>
-    <div class="tiles" id="time-tiles"></div>
-    <div class="grid-2">
-      <div class="card">
-        <h2>По дням недели</h2>
-        <p class="hint">Группировка по времени открытия сделки.</p>
-        <div id="chart-weekday"></div>
+    <div class="stack">
+      <div class="tiles" id="time-tiles"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>По дням недели</h2>
+          <p class="hint">Группировка по времени открытия сделки.</p>
+          <div id="chart-weekday"></div>
+        </div>
+        <div class="card">
+          <h2>По часам</h2>
+          <p class="hint">Время терминала (сервер брокера) — тот же час, что был на графике.</p>
+          <div id="chart-hour"></div>
+        </div>
       </div>
       <div class="card">
-        <h2>По часам</h2>
-        <p class="hint">Время терминала (сервер брокера) — тот же час, что был на графике.</p>
-        <div id="chart-hour"></div>
+        <h2>Календарь по дням</h2>
+        <p class="hint">Насыщенность клетки — размер результата дня; серые клетки — дни без сделок.</p>
+        <div class="cal-scroll" id="chart-calendar"></div>
+        <div class="scale">
+          <span>Убыток</span>
+          <span class="steps" id="scale-steps"></span>
+          <span>Прибыль</span>
+        </div>
       </div>
-    </div>
-    <div class="card">
-      <h2>Календарь по дням</h2>
-      <p class="hint">Насыщенность клетки — размер результата дня; серые клетки — дни без сделок.</p>
-      <div class="cal-scroll" id="chart-calendar"></div>
-      <div class="scale">
-        <span>Убыток</span>
-        <span class="steps" id="scale-steps"></span>
-        <span>Прибыль</span>
+      <div class="grid-2">
+        <div class="card">
+          <h2>По длительности сделки</h2>
+          <p class="hint">Сколько приносят сделки в зависимости от того, как долго они живут.</p>
+          <div id="chart-duration"></div>
+        </div>
+        <div class="card">
+          <h2>Подробно по часам</h2>
+          <div class="table-wrap"><table id="table-hours"></table></div>
+        </div>
       </div>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <h2>По длительности сделки</h2>
-        <p class="hint">Сколько приносят сделки в зависимости от того, как долго они живут.</p>
-        <div id="chart-duration"></div>
-      </div>
-      <div class="card">
-        <h2>Подробно по часам</h2>
-        <div class="table-wrap"><table id="table-hours"></table></div>
-      </div>
-    </div>
+  </div>
   </section>
 
   <!-- РИСК -->
   <section class="panel" id="panel-risk" hidden>
-    <div class="card">
-      <h2>Разбор дисциплины</h2>
-      <p class="hint">Каждый пункт посчитан по сделкам за выбранный период.</p>
-      <div class="findings" id="findings-full"></div>
-    </div>
-    <div class="tiles" id="risk-tiles"></div>
-    <div class="grid-2">
-      <div class="card">
-        <h2>Распределение по R</h2>
-        <p class="hint">R — результат сделки, делённый на риск, заложенный стоп-лоссом. 1R прибыли — ровно столько, сколько ты был готов потерять.</p>
-        <div id="chart-r"></div>
+    <div class="stack">
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card">
+          <h2>Оценка дисциплины</h2>
+          <p class="hint" id="score-hint">Среднее по измеримым привычкам. Каждая строка — цифра, которая
+            есть и в других разделах; оценка ничего не добавляет от себя.</p>
+          <div class="score-head">
+            <span class="score-value num" id="score-value">—</span>
+            <span class="score-of" id="score-of"></span>
+          </div>
+          <div id="score-total-meter"></div>
+          <div class="score-list" id="score-list"></div>
+        </div>
+        <div class="card">
+          <h2>Разбор дисциплины</h2>
+          <p class="hint">Каждый пункт посчитан по сделкам за выбранный период.</p>
+          <div class="findings" id="findings-full"></div>
+        </div>
       </div>
-      <div class="card">
-        <h2>Дни с перебором сделок</h2>
-        <p class="hint">Дни, где сделок заметно больше обычного, и их результат.</p>
-        <div class="table-wrap"><table id="table-busy"></table></div>
+      <div class="tiles" id="risk-tiles" style="margin-bottom:16px"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Распределение по R</h2>
+          <p class="hint">R — результат сделки, делённый на риск, заложенный стоп-лоссом. 1R прибыли — ровно столько, сколько ты был готов потерять.</p>
+          <div id="chart-r"></div>
+        </div>
+        <div class="card">
+          <h2>Дни с перебором сделок</h2>
+          <p class="hint">Дни, где сделок заметно больше обычного, и их результат.</p>
+          <div class="table-wrap"><table id="table-busy"></table></div>
+        </div>
       </div>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <h2>Стопы, которые не удержали</h2>
-        <p class="hint">Убыток вышел за плановый риск более чем на 20% — проскальзывание, гэп или отодвинутый стоп.</p>
-        <div class="table-wrap"><table id="table-overruns"></table></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Стопы, которые не удержали</h2>
+          <p class="hint">Убыток вышел за плановый риск более чем на 20% — проскальзывание, гэп или отодвинутый стоп.</p>
+          <div class="table-wrap"><table id="table-overruns"></table></div>
+        </div>
+        <div class="card">
+          <h2>Самые крупные риски</h2>
+          <p class="hint">Сделки, где риск был в 1.5+ раза выше медианного.</p>
+          <div class="table-wrap"><table id="table-oversized"></table></div>
+        </div>
       </div>
-      <div class="card">
-        <h2>Самые крупные риски</h2>
-        <p class="hint">Сделки, где риск был в 1.5+ раза выше медианного.</p>
-        <div class="table-wrap"><table id="table-oversized"></table></div>
-      </div>
-    </div>
+  </div>
   </section>
 
   <!-- СДЕЛКИ -->

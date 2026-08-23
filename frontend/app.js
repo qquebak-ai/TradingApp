@@ -66,36 +66,136 @@
   }
 
   /* ---------- tiles ---------- */
-  function tile(key, value, detail, cls = '') {
+  let vizSeq = 0;
+  const pendingViz = [];
+
+  /**
+   * A stat tile: label, value, supporting detail, and an optional figure.
+   * The figure is queued rather than drawn inline because meters and
+   * sparklines need a mounted node — flushViz() runs once the HTML is in.
+   */
+  function tile(key, value, detail, cls = '', viz = null) {
+    let slot = '';
+    if (viz) {
+      const id = `viz-${vizSeq++}`;
+      slot = `<div class="tile-viz" id="${id}"></div>`;
+      pendingViz.push({ id, viz });
+    }
     return `<div class="tile"><span class="k">${key}</span>
       <span class="v ${cls}">${value}</span>
-      <span class="d">${detail || ''}</span></div>`;
+      <span class="d">${detail || ''}</span>${slot}</div>`;
   }
 
-  function renderTiles(s) {
+  function flushViz() {
+    while (pendingViz.length) {
+      const { id, viz } = pendingViz.shift();
+      const host = $(id);
+      if (host) viz(host);
+    }
+  }
+
+  const meterViz = (fraction, color) => host => Charts.meter(host, fraction, { color });
+
+  function renderTiles(s, risk) {
     const cur = state.currency;
+    const score = risk && risk.score ? risk.score : null;
+    const lossColor = 'var(--loss)';
+
     $('tiles').innerHTML = [
-      tile('Итог за период', signed(s.net_profit),
-        `${s.trades} сделок · ${pct(s.return_pct)} к старту${s.opening_balance_estimated ? ' (баланс оценён)' : ''}`,
-        signClass(s.net_profit)),
-      tile('Винрейт', `${s.win_rate}%`, `${s.wins} прибыльных / ${s.losses} убыточных`),
+      tile('Винрейт', `${s.win_rate}%`,
+        `${s.wins} прибыльных / ${s.losses} убыточных`, '',
+        meterViz(s.win_rate / 100, 'var(--profit)')),
+
       tile('Профит-фактор', s.profit_factor ?? '—',
-        `Заработано ${money(s.gross_profit, 0)} ${cur} · потеряно ${money(s.gross_loss, 0)} ${cur}`,
-        s.profit_factor >= 1 ? 'pos' : 'neg'),
-      tile('Средний результат сделки', signed(s.expectancy),
+        `Заработано ${money(s.gross_profit, 0)} · потеряно ${money(s.gross_loss, 0)}`,
+        s.profit_factor >= 1 ? 'pos' : 'neg',
+        // A profit factor of 1 is break-even, so the meter fills against 2.
+        meterViz(Math.min(1, (s.profit_factor || 0) / 2),
+          s.profit_factor >= 1 ? 'var(--profit)' : lossColor)),
+
+      tile('Средняя сделка', signed(s.expectancy),
         `+${money(s.avg_win, 0)} против ${money(s.avg_loss, 0)}`, signClass(s.expectancy)),
-      tile('Максимальная просадка',
-        `${s.max_drawdown > 0 ? '−' : ''}${money(s.max_drawdown, 0)} ${cur}`,
-        `${s.max_drawdown_pct}% от пика · ${s.drawdown_recovered ? 'восстановлена' : 'ещё не отыграна'}`,
-        'neg'),
-      tile('Отношение выигрыша к проигрышу', s.payoff_ratio ?? '—',
+
+      tile('Максимальная просадка', `${s.max_drawdown > 0 ? '−' : ''}${money(s.max_drawdown, 0)}`,
+        `${s.max_drawdown_pct}% от пика · ${s.drawdown_recovered ? 'отыграна' : 'ещё не отыграна'}`,
+        'neg', meterViz(Math.min(1, s.max_drawdown_pct / 50), lossColor)),
+
+      tile('Выигрыш к проигрышу', s.payoff_ratio ?? '—',
         `Серии: ${s.streaks.longest_wins} побед / ${s.streaks.longest_losses} убытков подряд`),
+
       tile('Комиссии и свопы', signed(s.costs),
-        `Комиссия ${money(s.commission, 0)} · своп ${money(s.swap, 0)}`,
-        signClass(s.costs)),
+        `Комиссия ${money(s.commission, 0)} · своп ${money(s.swap, 0)}`, signClass(s.costs)),
+
       tile('Дни с прибылью', `${s.day_win_rate}%`,
-        `${s.winning_days} из ${s.trading_days} торговых дней · ${s.avg_trades_per_day} сделки в день`),
+        `${s.winning_days} из ${s.trading_days} дней · ${s.avg_trades_per_day} сделки в день`,
+        '', meterViz(s.day_win_rate / 100, 'var(--profit)')),
+
+      score && score.score !== null
+        ? tile('Оценка дисциплины', score.score,
+            `Из 100 · ${score.measured} из ${score.possible} показателей`,
+            score.verdict === 'good' ? 'pos' : score.verdict === 'bad' ? 'neg' : '',
+            meterViz(score.score / 100,
+              score.verdict === 'good' ? 'var(--profit)' : lossColor))
+        : tile('Оценка дисциплины', '—', 'Нужны сделки со стоп-лоссом'),
     ].join('');
+    flushViz();
+  }
+
+  function renderHero(d) {
+    const s = d.summary;
+    const cur = state.currency;
+    const positive = s.net_profit >= 0;
+    $('hero').style.setProperty('--hero-accent', positive ? 'var(--profit)' : 'var(--loss)');
+
+    $('hero-figure').textContent = signed(s.net_profit);
+    $('hero-figure').className = `hero-figure num ${signClass(s.net_profit)}`;
+
+    const period = s.first_close
+      ? `${new Date(s.first_close).toLocaleDateString('ru-RU')} — ${new Date(s.last_close).toLocaleDateString('ru-RU')}`
+      : '—';
+    $('hero-meta').innerHTML = [
+      `<span class="pill ${positive ? 'up' : 'down'}">${positive ? '↑' : '↓'} ${pct(s.return_pct)} к старту</span>`,
+      `<span class="pill">${s.trades} сделок</span>`,
+      `<span class="pill">${period}</span>`,
+      s.opening_balance_estimated ? '<span class="pill">стартовый баланс оценён</span>' : '',
+    ].filter(Boolean).join('');
+
+    Charts.sparkline($('hero-spark'), d.equity.map(p => p.equity), {
+      height: 84, color: positive ? 'var(--profit)' : 'var(--loss)',
+    });
+
+    $('hero-facts').innerHTML = [
+      { v: `${money(s.opening_balance, 0)} ${cur}`, k: 'Старт периода' },
+      { v: `${money(s.closing_balance, 0)} ${cur}`, k: 'Конец периода' },
+      { v: s.sharpe ?? '—', k: 'Коэффициент Шарпа' },
+      { v: duration(s.avg_duration_minutes), k: 'Средняя сделка длится' },
+    ].map(f => `<div class="fact"><b class="num">${f.v}</b><span>${f.k}</span></div>`).join('');
+  }
+
+  function renderPositions(d) {
+    const host = $('positions');
+    const positions = d.open_positions || [];
+    if (!positions.length) {
+      $('positions-hint').textContent = 'Появляются здесь после синхронизации с MT5.';
+      host.innerHTML = `<div class="positions-none">
+        <span class="glyph" aria-hidden="true">◎</span>
+        <span>Сейчас открытых позиций нет</span></div>`;
+      return;
+    }
+    const floating = positions.reduce((sum, p) => sum + p.profit + (p.swap || 0), 0);
+    $('positions-hint').innerHTML =
+      `${positions.length} шт., плавающий результат <b class="${signClass(floating)}">${signed(floating)}</b>.`;
+
+    host.innerHTML = positions.map(p => {
+      const net = p.profit + (p.swap || 0);
+      return `<div class="position">
+        <span class="side-tag ${p.side}">${p.side === 'buy' ? 'buy' : 'sell'}</span>
+        <span class="who"><b>${p.symbol}</b>
+          <span>${money(p.volume, 2)} лот · вход ${p.open_price} · с ${dt(p.open_time)}</span></span>
+        <span class="pnl ${signClass(net)}">${signed(net)}
+          <span>${p.sl ? 'стоп ' + p.sl : 'без стопа'}</span></span>
+      </div>`;
+    }).join('');
   }
 
   /* ---------- findings ---------- */
@@ -112,19 +212,24 @@
   /* ---------- panels ---------- */
   function renderOverview(d) {
     $('no-window-data').hidden = d.summary.trades > 0;
-    renderTiles(d.summary);
+    renderHero(d);
+    renderTiles(d.summary, d.risk);
+    renderPositions(d);
+
     Charts.equity($('chart-equity'), d.equity, {
       currency: state.currency,
       opening: d.summary.opening_balance,
       height: 320,
     });
+
+    // The equity points already carry each trade's result, so the recent-form
+    // strip and the distribution need no extra request.
+    Charts.formStrip($('chart-form'), d.equity.slice(-40), { currency: state.currency });
+    Charts.distribution($('chart-distribution'), d.equity.map(p => p.net),
+      { currency: state.currency });
+    Charts.monthMatrix($('chart-matrix'), d.time.month, { currency: state.currency });
+
     renderFindings($('findings-short'), d.risk.findings.slice(0, 4));
-    Charts.bars($('chart-months'), d.time.month, {
-      currency: state.currency, height: 260,
-      label: r => r.label.slice(2),
-      tooltip: r => `<div class="t-row"><span>Сделок</span><b>${r.trades}</b></div>
-                     <div class="t-row"><span>Винрейт</span><b>${r.win_rate}%</b></div>`,
-    });
   }
 
   const SYMBOL_COLUMNS = [
@@ -209,8 +314,42 @@
     ], t.hour.filter(r => r.trades > 0));
   }
 
+  function renderScore(score) {
+    if (!score || score.score === null) {
+      $('score-value').textContent = '—';
+      $('score-of').textContent = 'нужны сделки со стоп-лоссом';
+      $('score-list').innerHTML = '';
+      $('score-total-meter').innerHTML = '';
+      return;
+    }
+    const tone = score.verdict === 'good' ? 'var(--profit)'
+      : score.verdict === 'bad' ? 'var(--loss)' : 'var(--warning)';
+    $('score-value').textContent = score.score;
+    $('score-value').style.color = score.verdict === 'good' ? 'var(--success-text)'
+      : score.verdict === 'bad' ? 'var(--critical)' : 'var(--ink)';
+    $('score-of').textContent = `из 100 · посчитано по ${score.measured} из ${score.possible} показателей`;
+    Charts.meter($('score-total-meter'), score.score / 100, { color: tone });
+
+    $('score-list').innerHTML = score.components.map((c, i) => `
+      <div class="score-row">
+        <span class="name">${c.label}</span>
+        <span class="val">${c.score}</span>
+        <span class="bar" id="score-bar-${i}"></span>
+        <span class="why">${c.detail}</span>
+      </div>`).join('');
+
+    score.components.forEach((c, i) => {
+      const host = $(`score-bar-${i}`);
+      if (!host) return;
+      Charts.meter(host, c.score / 100, {
+        color: c.score >= 80 ? 'var(--profit)' : c.score >= 55 ? 'var(--warning)' : 'var(--loss)',
+      });
+    });
+  }
+
   function renderRisk(d) {
     const r = d.risk;
+    renderScore(r.score);
     renderFindings($('findings-full'), r.findings);
 
     const rm = r.r_multiples, sizing = r.sizing, stops = r.stops;
@@ -234,6 +373,7 @@
         `Суммарно ${signed(r.revenge.net)} · средняя ${signed(r.revenge.avg_net)}`,
         r.revenge.hurts ? 'neg' : ''),
     ].join('');
+    flushViz();
 
     Charts.bars($('chart-r'), rm.histogram, {
       height: 240,

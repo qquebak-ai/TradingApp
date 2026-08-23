@@ -8,6 +8,7 @@ from backend.app.analytics.breakdowns import by_symbol, by_time
 from backend.app.analytics.core import equity_curve, max_drawdown, streaks, summary
 from backend.app.analytics.risk import (
     holding_bias,
+    risk_report,
     overtrading,
     r_multiples,
     revenge_trading,
@@ -214,3 +215,48 @@ def test_empty_history_does_not_explode():
     assert max_drawdown([])["abs"] == 0.0
     assert overtrading([])["busy_days"] == []
     assert revenge_trading([])["count"] == 0
+
+
+# ---------------------------------------------------------------- score
+
+
+def test_score_is_perfect_when_every_habit_is_clean():
+    trades = [make(100, sl=1.09, minutes=30, day_offset=i, hour=9) for i in range(6)]
+    trades += [make(-10, sl=1.09, minutes=20, day_offset=i + 6, hour=9) for i in range(4)]
+    score = risk_report(trades)["score"]
+
+    assert score["score"] > 90
+    assert score["verdict"] == "good"
+    assert {c["key"] for c in score["components"]} >= {"stops", "sizing", "respect"}
+
+
+def test_score_drops_when_stops_are_missing():
+    with_stops = [make(50, sl=1.09) for _ in range(10)]
+    without = [make(50) for _ in range(10)]
+
+    protected = risk_report(with_stops)["score"]["components"]
+    exposed = risk_report(without)["score"]["components"]
+
+    assert next(c for c in protected if c["key"] == "stops")["score"] == 100.0
+    assert next(c for c in exposed if c["key"] == "stops")["score"] == 0.0
+
+
+def test_score_only_counts_what_the_data_supports():
+    """No stops in the history means no risk-based component may be invented."""
+    score = risk_report([make(10), make(-10)])["score"]
+    keys = {c["key"] for c in score["components"]}
+    assert "sizing" not in keys and "respect" not in keys
+    assert score["measured"] == len(score["components"])
+    assert score["measured"] < score["possible"]
+
+
+def test_score_is_the_mean_of_its_components():
+    score = risk_report([make(40, sl=1.09), make(-20, sl=1.09, minutes=300)])["score"]
+    expected = sum(c["score"] for c in score["components"]) / len(score["components"])
+    assert score["score"] == pytest.approx(round(expected, 1))
+
+
+def test_empty_history_has_no_score_rather_than_a_zero():
+    score = risk_report([])["score"]
+    assert score["score"] is None and score["verdict"] == "unknown"
+    assert score["components"] == []

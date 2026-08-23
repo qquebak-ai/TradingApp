@@ -215,9 +215,10 @@ def overtrading(trades: Sequence[Trade]) -> dict:
 
     counts = [len(day_trades) for day_trades in per_day.values()]
     if not counts:
+        # Same shape as the populated result: callers index these keys directly.
         return {"median_trades_per_day": 0, "threshold": 0, "busy_days": [],
-                "busy_day_net": 0.0, "normal_day_net": 0.0, "busy_day_avg": 0.0,
-                "normal_day_avg": 0.0, "hurts": False}
+                "busy_day_count": 0, "busy_day_net": 0.0, "normal_day_net": 0.0,
+                "busy_day_avg": 0.0, "normal_day_avg": 0.0, "hurts": False}
 
     median_count = _median(counts)
     threshold = max(median_count * OVERTRADE_FACTOR, median_count + 1)
@@ -258,7 +259,8 @@ def revenge_trading(trades: Sequence[Trade]) -> dict:
     """
     if not trades:
         return {"count": 0, "net": 0.0, "avg_net": 0.0, "win_rate": 0.0,
-                "baseline_avg_net": 0.0, "examples": [], "hurts": False}
+                "baseline_avg_net": 0.0, "median_volume": 0.0, "examples": [],
+                "hurts": False}
 
     median_volume = _median([t.volume for t in trades])
     by_open = sorted(trades, key=lambda t: t.open_time)
@@ -319,6 +321,7 @@ def risk_report(trades: Sequence[Trade]) -> dict:
         "revenge": revenge_trading(trades),
     }
     report["findings"] = build_findings(report)
+    report["score"] = discipline_score(report)
     return report
 
 
@@ -445,3 +448,110 @@ def build_findings(report: dict) -> list[dict]:
             }
         )
     return findings
+
+
+# Weights are equal on purpose: every component below is a habit the trader
+# controls directly, and there is no evidence base for ranking one above another.
+SCORE_COMPONENTS = (
+    ("stops", "Стопы выставлены"),
+    ("sizing", "Ровный риск"),
+    ("respect", "Стопы соблюдаются"),
+    ("holding", "Убытки не пересиживаются"),
+    ("volume", "Без перебора сделок"),
+    ("revenge", "Без отыгрыша"),
+)
+
+
+def _band(value: float, good: float, bad: float) -> float:
+    """Map a measurement onto 0–100, clamped, where `good` scores 100."""
+    if good == bad:
+        return 100.0
+    ratio = (value - bad) / (good - bad)
+    return max(0.0, min(100.0, ratio * 100.0))
+
+
+def discipline_score(report: dict) -> dict:
+    """A transparent composite of the habits measured above.
+
+    Every part is a number already shown elsewhere on the page — the score adds
+    no new judgement, it just averages what could be measured. Components that
+    the data cannot support (no stops in the history, a single trading day) are
+    dropped rather than guessed, and `measured` says how many survived.
+    """
+    parts: list[dict] = []
+
+    stops = report["stops"]
+    if stops["trades"]:
+        parts.append({
+            "key": "stops",
+            "score": stops["sl_coverage_pct"],
+            "detail": f"{stops['with_sl']} из {stops['trades']} сделок со стопом",
+        })
+
+    sizing = report["sizing"]
+    if sizing["risk_cv"] is not None:
+        parts.append({
+            "key": "sizing",
+            "score": _band(sizing["risk_cv"], good=0.25, bad=1.0),
+            "detail": f"разброс риска {sizing['risk_cv']}",
+        })
+
+    respect = report["stop_discipline"]
+    if respect["losses_checked"]:
+        parts.append({
+            "key": "respect",
+            "score": 100.0 - respect["overrun_pct"],
+            "detail": f"{respect['overruns']} из {respect['losses_checked']} убытков вышли за план",
+        })
+
+    holding = report["holding"]
+    if holding["loss_to_win_ratio"]:
+        parts.append({
+            "key": "holding",
+            "score": _band(holding["loss_to_win_ratio"], good=1.0, bad=3.0),
+            "detail": f"убытки живут в {holding['loss_to_win_ratio']} раза дольше прибыли",
+        })
+
+    over = report["overtrading"]
+    if over["busy_day_count"]:
+        gap = over["normal_day_avg"] - over["busy_day_avg"]
+        scale = max(abs(over["normal_day_avg"]), abs(over["busy_day_avg"]), 1.0)
+        parts.append({
+            "key": "volume",
+            "score": 100.0 if gap <= 0 else _band(gap / scale, good=0.0, bad=1.0),
+            "detail": f"{over['busy_day_count']} дней с перебором",
+        })
+
+    revenge = report["revenge"]
+    if revenge["count"]:
+        gap = revenge["baseline_avg_net"] - revenge["avg_net"]
+        scale = max(abs(revenge["baseline_avg_net"]), abs(revenge["avg_net"]), 1.0)
+        parts.append({
+            "key": "revenge",
+            "score": 100.0 if gap <= 0 else _band(gap / scale, good=0.0, bad=2.0),
+            "detail": f"{revenge['count']} увеличенных входов после убытка",
+        })
+
+    labels = dict(SCORE_COMPONENTS)
+    for part in parts:
+        part["label"] = labels[part["key"]]
+        part["score"] = round(part["score"], 1)
+
+    total = round(sum(p["score"] for p in parts) / len(parts), 1) if parts else None
+    return {
+        "score": total,
+        "verdict": _score_verdict(total),
+        "measured": len(parts),
+        "possible": len(SCORE_COMPONENTS),
+        "components": parts,
+    }
+
+
+def _score_verdict(score: Optional[float]) -> str:
+    if score is None:
+        return "unknown"
+    if score >= 80:
+        return "good"
+    if score >= 55:
+        return "warn"
+    return "bad"
