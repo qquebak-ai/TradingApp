@@ -69,20 +69,45 @@ if [ -n "$NEED" ]; then
 fi
 
 step "Настраиваю nginx"
-cp "$APP_DIR/deploy/nginx.conf.example" /etc/nginx/sites-available/tradingapp
-sed -i "s/ИМЯ_ХОСТА/$HOST/" /etc/nginx/sites-available/tradingapp
-ln -sf /etc/nginx/sites-available/tradingapp /etc/nginx/sites-enabled/tradingapp
+# Не во всех сборках nginx.conf подключает sites-enabled — у многих только
+# conf.d. Кладём конфиг туда, откуда его действительно прочитают.
+if nginx -T 2>/dev/null | grep -q 'sites-enabled' \
+   || grep -rq 'sites-enabled' /etc/nginx/nginx.conf 2>/dev/null; then
+  CONF=/etc/nginx/sites-available/tradingapp
+  LINK=/etc/nginx/sites-enabled/tradingapp
+  mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+else
+  echo "    nginx не подключает sites-enabled — кладу конфиг в conf.d."
+  CONF=/etc/nginx/conf.d/tradingapp.conf
+  LINK=""
+  mkdir -p /etc/nginx/conf.d
+fi
+
+cp "$APP_DIR/deploy/nginx.conf.example" "$CONF"
+sed -i "s/ИМЯ_ХОСТА/$HOST/" "$CONF"
+[ -n "$LINK" ] && ln -sf "$CONF" "$LINK"
+
+grep -q "server_name $HOST;" "$CONF" || {
+  echo "[!] Не удалось подставить имя хоста в конфиг." >&2; exit 1; }
 
 # Проверка ДО перезагрузки: если конфиг плох, действующий сайт не пострадает.
 if ! nginx -t; then
   echo "[!] nginx -t не прошёл. Убираю свой конфиг, чтобы не мешал." >&2
-  rm -f /etc/nginx/sites-enabled/tradingapp
+  rm -f "$CONF"; [ -n "$LINK" ] && rm -f "$LINK"
   exit 1
 fi
 systemctl reload nginx
 
 step "Проверяю доступ по HTTP"
-curl -fsS -H "Host: $HOST" "http://127.0.0.1/api/health" >/dev/null
+HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 \
+             -H "Host: $HOST" "http://127.0.0.1/api/health" || true)"
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "[!] nginx ответил кодом $HTTP_CODE вместо 200." >&2
+  echo "    Значит запрос обработал не наш конфиг. Проверь, какой server_name" >&2
+  echo "    перехватывает имя $HOST:" >&2
+  echo "      sudo nginx -T | grep -n 'server_name'" >&2
+  exit 1
+fi
 
 step "Выпускаю сертификат"
 CERT_OK=1
