@@ -109,6 +109,43 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 
+# venv может создаться БЕЗ pip: на Debian/Ubuntu ensurepip нередко есть как
+# модуль, но без встроенных колёс, и python3 -m venv тихо оставляет окружение
+# без pip. Поднимаем его тремя способами по очереди.
+if ! sudo -u "$APP_USER" "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+  echo "    В окружении нет pip — доставляю."
+
+  sudo -u "$APP_USER" "$VENV_PY" -m ensurepip --upgrade >/dev/null 2>&1 || true
+
+  if ! sudo -u "$APP_USER" "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null; then
+      echo "    Ставлю python3-venv и python3-pip, пересоздаю окружение."
+      apt-get update -qq || true
+      apt-get install -y -qq python3-venv python3-pip || true
+      rm -rf "$APP_DIR/.venv"
+      sudo -u "$APP_USER" python3 -m venv "$APP_DIR/.venv"
+    fi
+  fi
+
+  if ! sudo -u "$APP_USER" "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "    Последняя попытка: get-pip.py."
+    GETPIP="$(mktemp)"
+    if curl -fsS --max-time 60 https://bootstrap.pypa.io/get-pip.py -o "$GETPIP"; then
+      chmod 644 "$GETPIP"
+      sudo -u "$APP_USER" "$VENV_PY" "$GETPIP" >/dev/null 2>&1 || true
+    fi
+    rm -f "$GETPIP"
+  fi
+
+  if ! sudo -u "$APP_USER" "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "[!] Не удалось получить pip в окружении." >&2
+    echo "    Выполни вручную и запусти скрипт заново:" >&2
+    echo "      sudo apt install -y python3-venv python3-pip" >&2
+    exit 1
+  fi
+  echo "    pip готов."
+fi
+
 # sudo сбрасывает окружение, поэтому настройки прокси и сертификатов, если они
 # есть у root, надо передать явно — иначе pip упрётся в стену таймаутов.
 pip_as_app() {
