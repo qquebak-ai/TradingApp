@@ -90,7 +90,24 @@ fi
 sudo -u "$APP_USER" mkdir -p "$APP_DIR/data"
 
 step "Зависимости Python"
-[ -d "$APP_DIR/.venv" ] || sudo -u "$APP_USER" python3 -m venv "$APP_DIR/.venv"
+VENV_PY="$APP_DIR/.venv/bin/python"
+
+# Проверять наличие каталога .venv нельзя: прерванная установка оставляет его
+# пустым, и тогда скрипт «видит» готовое окружение и падает на отсутствующем
+# pip. Признак рабочего окружения — исполняемый python внутри него.
+if [ ! -x "$VENV_PY" ]; then
+  if [ -e "$APP_DIR/.venv" ]; then
+    echo "    Окружение неполное (осталось от прерванной установки) — пересоздаю."
+    rm -rf "$APP_DIR/.venv"
+  fi
+  sudo -u "$APP_USER" python3 -m venv "$APP_DIR/.venv"
+fi
+
+if [ ! -x "$VENV_PY" ]; then
+  echo "[!] Не удалось создать окружение Python в $APP_DIR/.venv" >&2
+  echo "    Попробуй вручную:  sudo apt install -y python3-venv" >&2
+  exit 1
+fi
 
 # sudo сбрасывает окружение, поэтому настройки прокси и сертификатов, если они
 # есть у root, надо передать явно — иначе pip упрётся в стену таймаутов.
@@ -101,11 +118,13 @@ pip_as_app() {
     ${NO_PROXY:+NO_PROXY="$NO_PROXY"} \
     ${PIP_CERT:+PIP_CERT="$PIP_CERT"} \
     ${PIP_INDEX_URL:+PIP_INDEX_URL="$PIP_INDEX_URL"} \
-    "$APP_DIR/.venv/bin/pip" "$@"
+    "$VENV_PY" -m pip "$@"
 }
 
 if ! pip_as_app install --quiet --upgrade pip; then
-  echo "[!] pip не смог выйти в интернет. Проверь DNS и доступ к pypi.org." >&2
+  echo "[!] pip не смог установить пакеты." >&2
+  echo "    Чаще всего это нет доступа к pypi.org — проверь DNS и файрвол:" >&2
+  echo "      curl -I https://pypi.org" >&2
   exit 1
 fi
 pip_as_app install --quiet -r "$APP_DIR/requirements.txt"
