@@ -1,0 +1,40 @@
+# systemd-юнит для VPS. Установка:
+#   sudo cp deploy/tradingapp.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now tradingapp
+# Логи:  journalctl -u tradingapp -f
+
+[Unit]
+Description=TradingApp — статистика торгового счёта MetaTrader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradingapp
+Group=tradingapp
+WorkingDirectory=/opt/tradingapp
+
+# Токен и настройки берутся отсюда. Файл должен быть chmod 600.
+EnvironmentFile=/opt/tradingapp/.env
+
+# Слушаем только localhost: наружу приложение смотрит через reverse proxy,
+# который держит HTTPS. Порт 8420 не должен быть открыт в интернет.
+ExecStart=/opt/tradingapp/.venv/bin/python -m uvicorn backend.app.main:app \
+          --host 127.0.0.1 --port 8420 --proxy-headers --forwarded-allow-ips='127.0.0.1'
+
+Restart=always
+RestartSec=5
+
+# Ограничения: процессу нужна запись только в свою папку с базой.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/tradingapp/data
+
+[Install]
+WantedBy=multi-user.target

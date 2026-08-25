@@ -1,0 +1,23 @@
+# Данные счёта — никогда не попадают в репозиторий
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Выгруженные из терминала отчёты
+statements/
+*.htm
+!samples/*.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# Прочее
+.DS_Store
+node_modules/

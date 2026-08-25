@@ -1,0 +1,39 @@
+# nginx для TradingApp. Кладётся отдельным файлом и не трогает твой текущий сайт.
+#
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/tradingapp
+#   sudo nano /etc/nginx/sites-available/tradingapp     # заменить ИМЯ_ХОСТА
+#   sudo ln -s /etc/nginx/sites-available/tradingapp /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d ИМЯ_ХОСТА
+#
+# ЕСЛИ НЕТ ДОМЕНА: используй sslip.io — адрес вида 123.45.67.89.sslip.io
+# автоматически резолвится в этот IP, регистрация не нужна, и Let's Encrypt
+# спокойно выдаёт на него сертификат. Просто подставь свой IP.
+#
+# Поддомен (или sslip-имя) обязателен: подпапка вида example.com/trading
+# не заработает, фронтенд запрашивает /static и /api от корня сайта.
+
+# Только IPv4: на VPS без IPv6 строка `listen [::]:80` роняет `nginx -t`,
+# а вместе с ним и reload — то есть заодно и уже работающий сайт.
+# Нужен IPv6 — добавь `listen [::]:80;` сюда, когда убедишься, что он включён.
+server {
+    listen 80;
+    server_name ИМЯ_ХОСТА;
+
+    # certbot допишет сюда редирект на https после выпуска сертификата.
+    location / {
+        proxy_pass http://127.0.0.1:8420;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # Отчёты MT4/MT5 бывают в несколько мегабайт, а лимит по умолчанию — 1 МБ.
+    client_max_body_size 32m;
+
+    access_log /var/log/nginx/tradingapp.access.log;
+    error_log  /var/log/nginx/tradingapp.error.log;
+}

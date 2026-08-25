@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradingApp — статистика счёта</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📈</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">T</span>
+    <h1>TradingApp</h1>
+    <span class="sub" id="acct-server">статистика счёта MetaTrader</span>
+  </div>
+
+  <div class="acct" id="acct-strip" hidden>
+    <div class="item"><span>Счёт</span><span id="acct-login">—</span></div>
+    <div class="item"><span>Баланс</span><span id="acct-balance" class="num">—</span></div>
+    <div class="item"><span>Средства</span><span id="acct-equity" class="num">—</span></div>
+    <div class="item"><span>Открытых позиций</span><span id="acct-open" class="num">0</span></div>
+  </div>
+
+  <button id="btn-filters" title="Показать фильтры" aria-label="Показать фильтры" aria-expanded="false"><span class="lbl-full">Фильтры</span><span class="lbl-short" aria-hidden="true">☰</span></button>
+  <button id="btn-sync" title="Прочитать историю напрямую из терминала MT5 (только Windows)"><span class="lbl-full">Синхронизировать MT5</span><span class="lbl-short">MT5</span></button>
+  <button id="btn-import" class="primary"><span class="lbl-full">Импорт отчёта</span><span class="lbl-short">Импорт</span></button>
+  <button id="btn-theme" title="Светлая / тёмная тема" aria-label="Переключить тему">◐</button>
+</header>
+
+<section class="filters" id="filters" hidden>
+  <div class="field">
+    <label for="f-from">С даты</label>
+    <input type="date" id="f-from">
+  </div>
+  <div class="field">
+    <label for="f-to">По дату</label>
+    <input type="date" id="f-to">
+  </div>
+  <div class="field">
+    <label for="f-symbol">Инструмент</label>
+    <select id="f-symbol"><option value="">Все</option></select>
+  </div>
+  <div class="field">
+    <label for="f-magic">Magic (советник)</label>
+    <select id="f-magic"><option value="">Все</option></select>
+  </div>
+  <div class="field">
+    <label>Быстрый период</label>
+    <div class="chips" id="quick-ranges">
+      <button class="chip" data-days="30" aria-pressed="false">30 дней</button>
+      <button class="chip" data-days="90" aria-pressed="false">90 дней</button>
+      <button class="chip" data-days="365" aria-pressed="false">Год</button>
+      <button class="chip" data-days="0" aria-pressed="true">Всё</button>
+    </div>
+  </div>
+  <button id="btn-export">Выгрузить CSV</button>
+</section>
+
+<nav class="tabs" id="tabs" hidden>
+  <button class="tab" data-panel="overview" aria-selected="true">Обзор</button>
+  <button class="tab" data-panel="symbols" aria-selected="false">Инструменты</button>
+  <button class="tab" data-panel="time" aria-selected="false">Время</button>
+  <button class="tab" data-panel="risk" aria-selected="false">Риск и дисциплина</button>
+  <button class="tab" data-panel="trades" aria-selected="false">Сделки</button>
+</nav>
+
+<main>
+  <div id="login" class="empty" hidden>
+    <h2>Нужен токен доступа</h2>
+    <p>Дашборд закрыт паролем, потому что показывает историю твоего счёта.<br>
+       Введи токен из переменной <code>TRADINGAPP_TOKEN</code> — браузер запомнит его.</p>
+    <form id="login-form" class="login-form" autocomplete="on">
+      <input type="password" id="login-token" name="password" placeholder="Токен доступа"
+             autocomplete="current-password" required>
+      <button type="submit" class="primary">Войти</button>
+    </form>
+    <p class="status" id="login-status"></p>
+  </div>
+
+  <div id="empty" class="empty">
+    <h2>Данных пока нет</h2>
+    <p>Загрузи отчёт из терминала MetaTrader — и увидишь всю статистику по счёту.<br>
+       Или синхронизируйся напрямую с MT5, если приложение запущено рядом с терминалом.</p>
+    <p><button class="primary" id="btn-import-empty">Импортировать отчёт</button></p>
+  </div>
+
+  <!-- ОБЗОР -->
+  <section class="panel" id="panel-overview" hidden>
+    <div class="stack">
+      <div class="card" id="no-window-data" hidden>
+        <h2>За выбранный период сделок нет</h2>
+        <p class="hint">Смени даты или нажми «Всё», чтобы увидеть всю историю.</p>
+      </div>
+
+      <div class="hero" id="hero">
+        <div class="hero-main">
+          <span class="hero-label" id="hero-label">Итог за период</span>
+          <span class="hero-figure num" id="hero-figure">—</span>
+          <div class="hero-meta" id="hero-meta"></div>
+        </div>
+        <div class="hero-side">
+          <div class="hero-spark" id="hero-spark"></div>
+          <div class="hero-facts" id="hero-facts"></div>
+        </div>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="card">
+        <h2>Кривая баланса</h2>
+        <p class="hint">Баланс после каждой закрытой сделки. Красная зона — насколько счёт ниже своего пика.</p>
+        <div class="legend">
+          <span class="key"><i class="swatch" style="background:var(--profit)"></i>Баланс</span>
+          <span class="key"><i class="swatch" style="background:var(--loss);opacity:.35"></i>Просадка от пика</span>
+          <span class="key"><i class="swatch" style="background:var(--axis)"></i>Стартовый баланс</span>
+        </div>
+        <div id="chart-equity"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>Последние 40 сделок</h2>
+          <p class="hint">Каждый столбик — одна сделка, слева старые. Видно серии и то, чем они кончались.</p>
+          <div id="chart-form"></div>
+        </div>
+        <div class="card">
+          <h2>Открытые позиции</h2>
+          <p class="hint" id="positions-hint">Обновляются при синхронизации с терминалом.</p>
+          <div class="positions" id="positions"></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>Что стоит поправить</h2>
+          <p class="hint">Выводы построены по твоей истории сделок, а не по общим правилам.</p>
+          <div class="findings" id="findings-short"></div>
+        </div>
+        <div class="card">
+          <h2>Распределение результатов</h2>
+          <p class="hint">Сколько сделок попало в каждый диапазон. Длинный хвост слева — редкие крупные убытки.</p>
+          <div id="chart-distribution"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Помесячно по годам</h2>
+        <p class="hint">Насыщенность клетки — размер результата месяца; серая клетка — месяц без сделок.</p>
+        <div class="table-wrap"><div id="chart-matrix"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ИНСТРУМЕНТЫ -->
+  <section class="panel" id="panel-symbols" hidden>
+    <div class="stack">
+      <div class="card">
+        <h2>P&L по инструментам</h2>
+        <p class="hint">Синий — инструмент приносит деньги, красный — забирает. Значение подписано у каждой полосы.</p>
+        <div id="chart-symbols"></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Покупки против продаж</h2>
+          <p class="hint">Перекос в одну сторону часто означает, что работает только половина системы.</p>
+          <div id="chart-sides"></div>
+        </div>
+        <div class="card">
+          <h2>Рейтинг инструментов</h2>
+          <p class="hint">Места по итоговому результату за период.</p>
+          <div class="table-wrap"><table id="table-extremes"></table></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Подробно по инструментам</h2>
+        <div class="table-wrap"><table id="table-symbols"></table></div>
+      </div>
+  </div>
+  </section>
+
+  <!-- ВРЕМЯ -->
+  <section class="panel" id="panel-time" hidden>
+    <div class="stack">
+      <div class="tiles" id="time-tiles"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>По дням недели</h2>
+          <p class="hint">Группировка по времени открытия сделки.</p>
+          <div id="chart-weekday"></div>
+        </div>
+        <div class="card">
+          <h2>По часам</h2>
+          <p class="hint">Время терминала (сервер брокера) — тот же час, что был на графике.</p>
+          <div id="chart-hour"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Календарь по дням</h2>
+        <p class="hint">Насыщенность клетки — размер результата дня; серые клетки — дни без сделок.</p>
+        <div class="cal-scroll" id="chart-calendar"></div>
+        <div class="scale">
+          <span>Убыток</span>
+          <span class="steps" id="scale-steps"></span>
+          <span>Прибыль</span>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>По длительности сделки</h2>
+          <p class="hint">Сколько приносят сделки в зависимости от того, как долго они живут.</p>
+          <div id="chart-duration"></div>
+        </div>
+        <div class="card">
+          <h2>Подробно по часам</h2>
+          <div class="table-wrap"><table id="table-hours"></table></div>
+        </div>
+      </div>
+  </div>
+  </section>
+
+  <!-- РИСК -->
+  <section class="panel" id="panel-risk" hidden>
+    <div class="stack">
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card">
+          <h2>Оценка дисциплины</h2>
+          <p class="hint" id="score-hint">Среднее по измеримым привычкам. Каждая строка — цифра, которая
+            есть и в других разделах; оценка ничего не добавляет от себя.</p>
+          <div class="score-head">
+            <span class="score-value num" id="score-value">—</span>
+            <span class="score-of" id="score-of"></span>
+          </div>
+          <div id="score-total-meter"></div>
+          <div class="score-list" id="score-list"></div>
+        </div>
+        <div class="card">
+          <h2>Разбор дисциплины</h2>
+          <p class="hint">Каждый пункт посчитан по сделкам за выбранный период.</p>
+          <div class="findings" id="findings-full"></div>
+        </div>
+      </div>
+      <div class="tiles" id="risk-tiles" style="margin-bottom:16px"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Распределение по R</h2>
+          <p class="hint">R — результат сделки, делённый на риск, заложенный стоп-лоссом. 1R прибыли — ровно столько, сколько ты был готов потерять.</p>
+          <div id="chart-r"></div>
+        </div>
+        <div class="card">
+          <h2>Дни с перебором сделок</h2>
+          <p class="hint">Дни, где сделок заметно больше обычного, и их результат.</p>
+          <div class="table-wrap"><table id="table-busy"></table></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Стопы, которые не удержали</h2>
+          <p class="hint">Убыток вышел за плановый риск более чем на 20% — проскальзывание, гэп или отодвинутый стоп.</p>
+          <div class="table-wrap"><table id="table-overruns"></table></div>
+        </div>
+        <div class="card">
+          <h2>Самые крупные риски</h2>
+          <p class="hint">Сделки, где риск был в 1.5+ раза выше медианного.</p>
+          <div class="table-wrap"><table id="table-oversized"></table></div>
+        </div>
+      </div>
+  </div>
+  </section>
+
+  <!-- СДЕЛКИ -->
+  <section class="panel" id="panel-trades" hidden>
+    <div class="card">
+      <h2>Сделки</h2>
+      <p class="hint" id="trades-hint">—</p>
+      <div class="table-wrap"><table id="table-trades"></table></div>
+      <p style="margin-top:12px">
+        <button id="btn-more">Показать ещё</button>
+      </p>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg-import">
+  <div class="dlg-head">
+    <h2>Импорт отчёта MetaTrader</h2>
+    <p>Поддерживаются HTML-отчёты MT4 и MT5, а также XLSX и CSV.</p>
+  </div>
+  <div class="dlg-body">
+    <div class="drop" id="drop">
+      Перетащи файл сюда или <b>выбери на диске</b>
+      <input type="file" id="file" accept=".html,.htm,.csv,.tsv,.xlsx,.xlsm" hidden>
+    </div>
+    <ol class="steps-list">
+      <li><b>MT4:</b> вкладка «Терминал» → «История счёта» → правый клик → «Сохранить как детальный отчёт».</li>
+      <li><b>MT5:</b> вкладка «Инструменты» → «История» → правый клик → «Отчёт» → HTML или XLSX.</li>
+      <li>Повторный импорт того же периода не создаёт дублей — сделки сверяются по номеру.</li>
+    </ol>
+    <div class="status" id="import-status"></div>
+  </div>
+  <div class="dlg-foot">
+    <button id="dlg-close">Закрыть</button>
+  </div>
+</dialog>
+
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
